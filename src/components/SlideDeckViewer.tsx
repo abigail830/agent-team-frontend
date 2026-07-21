@@ -1,10 +1,13 @@
-import { useEffect, useState, type SyntheticEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type SyntheticEvent } from 'react'
 import type { ArtifactSpec } from '../types/artifact'
 import { LoadingSpinner } from './LoadingSpinner'
 
 type Props = {
   spec: ArtifactSpec
 }
+
+const PREVIEW_PAD_PX = 24
+const SLIDE_RATIO = 16 / 9
 
 /** Slidev router breaks when the iframe URL ends with /index.html — use /preview/ instead. */
 export function normalizeSlidePreviewUrl(url: string): string {
@@ -13,15 +16,62 @@ export function normalizeSlidePreviewUrl(url: string): string {
   return trimmed.replace(/\/index\.html\/?$/i, '/')
 }
 
+function notifyDeckResize(iframe: HTMLIFrameElement | null) {
+  try {
+    iframe?.contentWindow?.postMessage({ type: 'deck-resize' }, '*')
+  } catch {
+    // Cross-origin or detached iframe.
+  }
+}
+
 export function SlideDeckViewer({ spec }: Props) {
   const previewUrl = spec.preview_url ? normalizeSlidePreviewUrl(spec.preview_url) : null
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const iframeRef = useRef<HTMLIFrameElement>(null)
   const [iframeState, setIframeState] = useState<'loading' | 'ready' | 'error'>(
     previewUrl ? 'loading' : 'ready',
   )
 
+  const fitIframe = useCallback(() => {
+    const wrap = wrapRef.current
+    const iframe = iframeRef.current
+    if (!wrap || !iframe) return
+
+    const cw = Math.max(0, wrap.clientWidth - PREVIEW_PAD_PX)
+    const ch = Math.max(0, wrap.clientHeight - PREVIEW_PAD_PX)
+    if (!cw || !ch) return
+
+    let width = cw
+    let height = width / SLIDE_RATIO
+    if (height > ch) {
+      height = ch
+      width = height * SLIDE_RATIO
+    }
+
+    iframe.style.width = `${Math.floor(width)}px`
+    iframe.style.height = `${Math.floor(height)}px`
+    notifyDeckResize(iframe)
+  }, [])
+
   useEffect(() => {
     setIframeState(previewUrl ? 'loading' : 'ready')
   }, [previewUrl])
+
+  useEffect(() => {
+    const wrap = wrapRef.current
+    if (!wrap || !previewUrl) return
+
+    fitIframe()
+
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(() => fitIframe())
+      ro.observe(wrap)
+      return () => ro.disconnect()
+    }
+
+    window.addEventListener('resize', fitIframe)
+    return () => window.removeEventListener('resize', fitIframe)
+  }, [previewUrl, iframeState, fitIframe])
 
   const handleIframeLoad = (event: SyntheticEvent<HTMLIFrameElement>) => {
     const iframe = event.currentTarget
@@ -35,11 +85,12 @@ export function SlideDeckViewer({ spec }: Props) {
       // Cross-origin iframe — cannot inspect document.
     }
     setIframeState('ready')
+    fitIframe()
   }
 
   if (previewUrl) {
     return (
-      <div className="slide-deck-viewer-wrap">
+      <div ref={wrapRef} className="slide-deck-viewer-wrap">
         {iframeState === 'loading' ? (
           <div className="slide-deck-viewer-loading" aria-live="polite">
             <LoadingSpinner size="lg" />
@@ -53,6 +104,7 @@ export function SlideDeckViewer({ spec }: Props) {
           </div>
         ) : null}
         <iframe
+          ref={iframeRef}
           className="slide-deck-viewer"
           title={spec.title}
           src={previewUrl}
