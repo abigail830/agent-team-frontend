@@ -30,6 +30,15 @@ function notifyDeckResize(iframe: HTMLIFrameElement | null) {
   }
 }
 
+function isPreviewLoadFailure(bodyText: string): boolean {
+  const text = bodyText.trim()
+  if (!text) return false
+  if (/Preview file not found/i.test(text)) return true
+  if (/Not authenticated/i.test(text)) return true
+  if (/\b404\b/i.test(text) && (/not\s*found/i.test(text) || /NOT_FOUND/i.test(text))) return true
+  return false
+}
+
 export function SlideDeckViewer({ spec }: Props) {
   const previewUrl = spec.preview_url
     ? normalizeSlidePreviewUrl(resolveApiPath(spec.preview_url))
@@ -85,7 +94,7 @@ export function SlideDeckViewer({ spec }: Props) {
     const iframe = event.currentTarget
     try {
       const bodyText = iframe.contentDocument?.body?.innerText ?? ''
-      if (/\b404\b/.test(bodyText) && /not found/i.test(bodyText)) {
+      if (isPreviewLoadFailure(bodyText)) {
         setIframeState('error')
         return
       }

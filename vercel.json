@@ -1,4 +1,11 @@
 {
+  "redirects": [
+    {
+      "source": "/api/:path*/preview/",
+      "destination": "/api/:path*/preview",
+      "statusCode": 307
+    }
+  ],
   "rewrites": [
     {
       "source": "/api/:path*",
