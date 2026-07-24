@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type SyntheticEvent } from 'react'
 import type { ArtifactSpec } from '../types/artifact'
+import { resolveApiPath } from '../lib/apiBase'
 import { LoadingSpinner } from './LoadingSpinner'
 
 type Props = {
@@ -25,7 +26,9 @@ function notifyDeckResize(iframe: HTMLIFrameElement | null) {
 }
 
 export function SlideDeckViewer({ spec }: Props) {
-  const previewUrl = spec.preview_url ? normalizeSlidePreviewUrl(spec.preview_url) : null
+  const previewUrl = spec.preview_url
+    ? normalizeSlidePreviewUrl(resolveApiPath(spec.preview_url))
+    : null
   const wrapRef = useRef<HTMLDivElement>(null)
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const [iframeState, setIframeState] = useState<'loading' | 'ready' | 'error'>(
