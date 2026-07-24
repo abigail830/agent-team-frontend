@@ -946,6 +946,7 @@ export function ChatPage() {
       generation,
       abortController,
       segmentText: '',
+      reasoningSegment: '',
       runId: null as string | null,
       streamIdleSeen: false,
       reloadedAfterStream: false,
@@ -1041,6 +1042,7 @@ export function ChatPage() {
             }))
           }
           if (ev.event === 'reasoning_done') {
+            handle.reasoningSegment = ''
             patchStreamSession((prev) => ({
               messages: finalizeStreamReasoning(prev.messages),
             }))
@@ -1093,8 +1095,22 @@ export function ChatPage() {
             }
           }
           if (ev.event === 'reasoning' && typeof ev.data.text === 'string') {
+            const chunk = ev.data.text
+            if (
+              handle.reasoningSegment === '' ||
+              (chunk.length >= handle.reasoningSegment.length &&
+                chunk.startsWith(handle.reasoningSegment))
+            ) {
+              handle.reasoningSegment = chunk
+            } else if (chunk) {
+              handle.reasoningSegment += chunk
+            }
             patchStreamSession((prev) => ({
-              messages: applyStreamReasoning(prev.messages, activeChatId, ev.data.text as string),
+              messages: applyStreamReasoning(
+                prev.messages,
+                activeChatId,
+                handle.reasoningSegment,
+              ),
             }))
           }
           if (ev.event === 'tool_call' && ev.data) {

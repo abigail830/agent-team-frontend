@@ -4,6 +4,7 @@ export type ActiveStream = {
   generation: number
   abortController: AbortController
   segmentText: string
+  reasoningSegment: string
   runId: string | null
   streamIdleSeen: boolean
   reloadedAfterStream: boolean

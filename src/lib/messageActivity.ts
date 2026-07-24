@@ -1,6 +1,7 @@
 import type { Message } from '../types'
 import type { ArtifactSpec } from '../types/artifact'
 import type { VizSpec } from '../types/viz'
+import { isProposalArtifact } from './artifactKinds'
 
 export type ActivityEntry = {
   id: string
@@ -384,12 +385,20 @@ function commitLocalStreamText(messages: Message[]): Message[] {
   return [...removeMessageById(messages, LOCAL_STREAM_TEXT_ID), committed]
 }
 
-function finalizeLocalReasoning(messages: Message[]): Message[] {
-  return messages.map((message) =>
-    message.id === LOCAL_STREAM_REASONING_ID && message.metadata?.streaming === true
-      ? { ...message, metadata: { ...message.metadata, streaming: false } }
-      : message,
-  )
+/** Freeze the current reasoning segment so the next segment gets its own process card. */
+function commitLocalStreamReasoning(messages: Message[]): Message[] {
+  const existing = messages.find((message) => message.id === LOCAL_STREAM_REASONING_ID)
+  if (!existing) return messages
+  const content = existing.content ?? ''
+  if (!content.trim()) {
+    return removeMessageById(messages, LOCAL_STREAM_REASONING_ID)
+  }
+  const committed: Message = {
+    ...existing,
+    id: `local-reasoning-${existing.sequence}-${Date.now()}`,
+    metadata: localMetadata({ streaming: false }),
+  }
+  return [...removeMessageById(messages, LOCAL_STREAM_REASONING_ID), committed]
 }
 
 function localMetadata(extra: Record<string, unknown> = {}): Record<string, unknown> {
@@ -461,25 +470,31 @@ export function applyStreamText(messages: Message[], chatId: string, text: strin
   return upsertMessage(messages, message)
 }
 
-export function applyStreamReasoning(messages: Message[], chatId: string, chunk: string): Message[] {
-  if (!chunk) return messages
+export function applyStreamReasoning(messages: Message[], chatId: string, text: string): Message[] {
+  if (!text.trim()) return messages
   const existing = messages.find((message) => message.id === LOCAL_STREAM_REASONING_ID)
-  const message: Message = {
-    id: LOCAL_STREAM_REASONING_ID,
-    chat_id: chatId,
-    role: 'assistant',
-    message_type: 'reasoning',
-    content: `${existing?.content ?? ''}${chunk}`,
-    metadata: localMetadata({ streaming: true }),
-    parent_id: null,
-    sequence: existing?.sequence ?? nextSequence(messages),
-    created_at: existing?.created_at ?? new Date().toISOString(),
-  }
+  const message: Message = existing
+    ? {
+        ...existing,
+        content: text,
+        metadata: localMetadata({ streaming: true }),
+      }
+    : {
+        id: LOCAL_STREAM_REASONING_ID,
+        chat_id: chatId,
+        role: 'assistant',
+        message_type: 'reasoning',
+        content: text,
+        metadata: localMetadata({ streaming: true }),
+        parent_id: null,
+        sequence: nextSequence(messages),
+        created_at: new Date().toISOString(),
+      }
   return upsertMessage(messages, message)
 }
 
 export function finalizeStreamReasoning(messages: Message[]): Message[] {
-  return finalizeLocalReasoning(messages)
+  return commitLocalStreamReasoning(messages)
 }
 
 export function applyStreamToolCall(
@@ -487,7 +502,7 @@ export function applyStreamToolCall(
   chatId: string,
   data: Record<string, unknown>,
 ): Message[] {
-  let next = commitLocalStreamText(finalizeLocalReasoning(messages))
+  let next = commitLocalStreamText(commitLocalStreamReasoning(messages))
   const callId = String(data.call_id ?? `call-${Date.now()}`)
   const toolName = String(data.tool_name ?? '').trim() || 'unknown'
   const message: Message = {
@@ -513,7 +528,7 @@ export function applyStreamToolResult(
   chatId: string,
   data: Record<string, unknown>,
 ): Message[] {
-  let next = commitLocalStreamText(finalizeLocalReasoning(messages))
+  let next = commitLocalStreamText(commitLocalStreamReasoning(messages))
   const callId = String(data.call_id ?? `result-${Date.now()}`)
   const toolName = String(data.tool_name ?? '').trim() || 'unknown'
   const result = data.result
@@ -538,7 +553,7 @@ export function applyStreamToolResult(
 }
 
 export function applyStreamViz(messages: Message[], chatId: string, spec: VizSpec): Message[] {
-  const next = commitLocalStreamText(finalizeLocalReasoning(messages))
+  const next = commitLocalStreamText(commitLocalStreamReasoning(messages))
   return [
     ...next,
     {
@@ -560,7 +575,7 @@ export function applyStreamArtifact(
   chatId: string,
   spec: ArtifactSpec,
 ): Message[] {
-  const next = commitLocalStreamText(finalizeLocalReasoning(messages))
+  const next = commitLocalStreamText(commitLocalStreamReasoning(messages))
   return [
     ...next,
     {
@@ -595,7 +610,10 @@ export function groupMessages(messages: Message[], options?: { streaming?: boole
     if (message.message_type === 'artifact') {
       const spec = parseArtifactSpec(message.metadata)
       if (spec) {
-        blocks.push({ kind: 'artifact', id: message.id, spec, createdAt: message.created_at })
+        // Proposal/word downloads are linked in assistant text — skip duplicate inline cards.
+        if (!(isProposalArtifact(spec) && spec.download_url)) {
+          blocks.push({ kind: 'artifact', id: message.id, spec, createdAt: message.created_at })
+        }
         continue
       }
     }
