@@ -10,11 +10,16 @@ type Props = {
 const PREVIEW_PAD_PX = 24
 const SLIDE_RATIO = 16 / 9
 
-/** Slidev router breaks when the iframe URL ends with /index.html — use /preview/ instead. */
+/**
+ * Normalize the iframe entry URL for slide previews.
+ * - Slidev: avoid `/index.html` (router breaks); use the preview index route instead.
+ * - Vercel frontend rewrites 404 on `/preview/` (trailing slash); entry must be `/preview`.
+ */
 export function normalizeSlidePreviewUrl(url: string): string {
   const trimmed = url.trim()
   if (!trimmed) return trimmed
-  return trimmed.replace(/\/index\.html\/?$/i, '/')
+  const withoutIndex = trimmed.replace(/\/index\.html\/?$/i, '/preview')
+  return withoutIndex.replace(/\/preview\/+$/i, '/preview')
 }
 
 function notifyDeckResize(iframe: HTMLIFrameElement | null) {
